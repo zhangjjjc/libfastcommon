@@ -1,4 +1,52 @@
 
+
+Version 1.41  2019-09-30
+  * change CIDR network_bits range from [16, 32) to [10, 32)
+  * ini_file_reader.c: fix empty string compare
+  * multi_socket_client.c: code refine
+  * sockopt.[hc] support IPv6
+
+Version 1.40  2018-11-09
+  * add function conn_pool_parse_server_info and conn_pool_load_server_info
+  * support directive: #@add_annotation, for example:
+    #@add_annotation CONFIG_GET /usr/lib/libshmcache.so /etc/libshmcache.conf
+  * add function fc_split_string and fc_match_delim
+  * add json_parser.[hc] for parse json array and map
+  * add function fc_strdup
+  * add function fc_memmem
+  * add function format_http_date
+  * add function hash_find1 and hash_find2
+  * add function resolve_path and fast_buffer_append_file
+  * add function id_generator_next_extra_ptr, with NULL pointer to set
+    extra data to sn % (1 << extra_bits)
+
+Version 1.39  2018-07-31
+  * add #@function REPLACE_VARS
+  * #@set value can embed %{VARIABLE}
+  * shared_func.h: add function starts_with and ends_with
+  * common_blocked_queue.h: add function common_blocked_queue_try_pop
+  * sched_thread.c: fix first schedule time
+  * ini_file_reader add function iniGetRequiredStrValueEx
+  * add file fc_list.h
+  * sockopt.c: add global variable try_again_when_interrupt
+
+Version 1.38  2018-06-26
+  * connection_pool.c: set err_no to 0 when success
+  * shared_func.h: add functions float2buff / buff2float, double2buff / buff2double
+  * logger.h: add function log_get_level_caption
+  * add files: common_blocked_queue.[hc]
+  * add files: multi_socket_client.[hc]
+  * ioevent.[hc]: remove care_events in FreeBSD or MacOS
+  * add skiplist_set.[hc] and skiplist bug fixed
+  * correct CRC32
+  * shared_func.h: add functions int2str and long2str
+  * sched_thread.h: add function sched_print_all_entries
+
+Version 1.37  2018-02-24
+  * ini_file_reader.c function annotations LOCAL_IP_GET support index, such as:
+   #@function LOCAL_IP_GET
+    bind_addr=private[0]
+
 Version 1.36  2017-03-08
   * correct getFileContentEx read bytes
 

@@ -18,6 +18,8 @@
 
 #define FAST_INI_ITEM_NAME_LEN		64
 #define FAST_INI_ITEM_VALUE_LEN		256
+#define FAST_INI_ITEM_NAME_SIZE		(FAST_INI_ITEM_NAME_LEN + 1)
+#define FAST_INI_ITEM_VALUE_SIZE    (FAST_INI_ITEM_VALUE_LEN + 1)
 
 #define FAST_INI_ANNOTATION_WITHOUT_BUILTIN 0
 #define FAST_INI_ANNOTATION_DISABLE         1
@@ -27,33 +29,26 @@
 #define FAST_INI_FLAGS_NONE            0
 #define FAST_INI_FLAGS_SHELL_EXECUTE   1
 
-typedef struct {
-    char *func_name;
-    int (*func_init) ();
-    void (*func_destroy) ();
-    int (*func_get) (char *key, char **pOutValue, int max_values);
-} AnnotationMap;
-
-typedef struct
+typedef struct ini_item
 {
-	char name[FAST_INI_ITEM_NAME_LEN + 1];
-	char value[FAST_INI_ITEM_VALUE_LEN + 1];
+	char name[FAST_INI_ITEM_NAME_SIZE];
+	char value[FAST_INI_ITEM_VALUE_SIZE];
 } IniItem;
 
-typedef struct
+typedef struct ini_section
 {
 	IniItem *items;
 	int count;  //item count
 	int alloc_count;
 } IniSection;
 
-typedef struct
+typedef struct ini_section_info
 {
-    char section_name[FAST_INI_ITEM_NAME_LEN + 1];
+    char section_name[FAST_INI_ITEM_NAME_SIZE];
     IniSection *pSection;
 } IniSectionInfo;
 
-typedef struct
+typedef struct ini_context
 {
 	IniSection global;
 	HashArray sections;  //key is session name, and value is IniSection
@@ -62,6 +57,24 @@ typedef struct
     char annotation_type;
     char flags;
 } IniContext;
+
+typedef struct ini_annotation_entry {
+    char *func_name;
+    void *arg;
+    void *dlhandle;
+
+    int (*func_init) (struct ini_annotation_entry *annotation);
+    void (*func_destroy) (struct ini_annotation_entry *annotation);
+    int (*func_get) (IniContext *context,
+            struct ini_annotation_entry *annotation,
+            const IniItem *item,
+            char **pOutValue, int max_values);
+
+    void (*func_free) (struct ini_annotation_entry *annotation,
+            char **values, const int count);
+
+    bool inited;
+} AnnotationEntry;
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,8 +86,11 @@ extern "C" {
      strcasecmp(pValue, "on") == 0 ||   \
      strcmp(pValue, "1") == 0)
 
-int iniSetAnnotationCallBack(AnnotationMap *map, int count);
+int iniSetAnnotationCallBack(AnnotationEntry *annotations, int count);
 void iniDestroyAnnotationCallBack();
+
+void iniAnnotationFreeValues(struct ini_annotation_entry *annotation,
+        char **values, const int count);
 
 /** load ini items from file
  *  parameters:
@@ -95,7 +111,7 @@ int iniLoadFromFile(const char *szFilename, IniContext *pContext);
  *  return: error no, 0 for success, != 0 fail
 */
 int iniLoadFromFileEx(const char *szFilename, IniContext *pContext,
-    const char annotation_type, AnnotationMap *annotations, const int count,
+    const char annotation_type, AnnotationEntry *annotations, const int count,
     const char flags);
 
 /** load ini items from string buffer
@@ -117,7 +133,7 @@ int iniLoadFromBuffer(char *content, IniContext *pContext);
  *  return: error no, 0 for success, != 0 fail
 */
 int iniLoadFromBufferEx(char *content, IniContext *pContext,
-    const char annotation_type, AnnotationMap *annotations, const int count,
+    const char annotation_type, AnnotationEntry *annotations, const int count,
     const char flags);
 
 /** free ini context
@@ -261,6 +277,25 @@ static inline IniItem *iniGetGlobalItems(IniContext *pContext, int *nCount)
 */
 IniItem *iniGetSectionItems(const char *szSectionName, IniContext *pContext,
         int *nCount);
+
+/** get item string value
+ *  parameters:
+ *           szSectionName: the section name, NULL or empty string for
+ *                          global section
+ *           szItemName: the item name
+ *           pContext:   the ini context
+ *           nMinLength: the min value length
+ *  return: item value, return NULL when the item not exist
+*/
+char *iniGetRequiredStrValueEx(const char *szSectionName, const char *szItemName,
+		IniContext *pContext, const int nMinLength);
+
+static inline char *iniGetRequiredStrValue(const char *szSectionName,
+        const char *szItemName, IniContext *pContext)
+{
+    const int nMinLength = 1;
+    return iniGetRequiredStrValueEx(szSectionName, szItemName, pContext, nMinLength);
+}
 
 #ifdef __cplusplus
 }

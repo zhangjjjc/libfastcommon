@@ -23,16 +23,29 @@
 #define MINOR_VERSION  0
 #define PATCH_VERSION  8
 
+#define IDG_FLAGS_EXTRA_DATA_BY_MOD   1
+
 #define PHP_IDG_RESOURCE_NAME "fastcommon_idg"
 #define DEFAULT_SN_FILENAME  "/tmp/fastcommon_id_generator.sn"
 
 typedef struct {
-    struct idg_context idg_context;
+    struct idg_context *idg_context;
+    int flags;
 } PHPIDGContext;
+
+typedef struct {
+    char filename[MAX_PATH_SIZE];
+    int machine_id;
+    int mid_bits;
+    int extra_bits;
+    int sn_bits;
+    int flags;
+} PHPIDGKeyInfo;
 
 static int le_consumer;
 
 static PHPIDGContext *last_idg_context = NULL;
+static HashArray idg_htable;
 
 typedef struct {
     int alloc;
@@ -108,32 +121,25 @@ zend_module_entry fastcommon_module_entry = {
 
 ZEND_RSRC_DTOR_FUNC(id_generator_dtor)
 {
+    PHPIDGContext *php_idg_context = NULL;
 #if PHP_MAJOR_VERSION < 7
-    if (rsrc->ptr != NULL)
-    {
-        PHPIDGContext *php_idg_context = (PHPIDGContext *)rsrc->ptr;
-        id_generator_destroy(&php_idg_context->idg_context);
-        if (last_idg_context == php_idg_context)
-        {
-            last_idg_context = NULL;
-        }
-        efree(php_idg_context);
+    if (rsrc->ptr != NULL) {
+        php_idg_context = (PHPIDGContext *)rsrc->ptr;
         rsrc->ptr = NULL;
     }
 #else
-    if (res->ptr != NULL)
-    {
-        PHPIDGContext *php_idg_context = (PHPIDGContext *)res->ptr;
-        id_generator_destroy(&php_idg_context->idg_context);
-        if (last_idg_context == php_idg_context)
-        {
-            last_idg_context = NULL;
-        }
-        efree(php_idg_context);
+    if (res->ptr != NULL) {
+        php_idg_context = (PHPIDGContext *)res->ptr;
         res->ptr = NULL;
     }
 #endif
 
+    if (php_idg_context != NULL) {
+        if (last_idg_context == php_idg_context) {
+            last_idg_context = NULL;
+        }
+        efree(php_idg_context);
+    }
 }
 
 #define FASTCOMMON_REGISTER_CHAR_STR_CONSTANT(key, c, buff) \
@@ -144,9 +150,12 @@ PHP_MINIT_FUNCTION(fastcommon)
 {
     static char buff[16];
 
-    log_init();
+    log_try_init();
     le_consumer = zend_register_list_destructors_ex(id_generator_dtor, NULL,
             PHP_IDG_RESOURCE_NAME, module_number);
+    if (hash_init(&idg_htable, simple_hash, 64, 0.75) != 0) {
+        return FAILURE;
+    }
 
     memset(buff, 0, sizeof(buff));
     FASTCOMMON_REGISTER_CHAR_STR_CONSTANT("FASTCOMMON_LOG_TIME_PRECISION_SECOND",
@@ -157,6 +166,9 @@ PHP_MINIT_FUNCTION(fastcommon)
             LOG_TIME_PRECISION_USECOND, buff + 4);
     FASTCOMMON_REGISTER_CHAR_STR_CONSTANT("FASTCOMMON_LOG_TIME_PRECISION_NONE",
             LOG_TIME_PRECISION_NONE, buff + 6);
+
+    REGISTER_LONG_CONSTANT("FASTCOMMON_IDG_FLAGS_EXTRA_DATA_BY_MOD",
+            IDG_FLAGS_EXTRA_DATA_BY_MOD, CONST_CS | CONST_PERSISTENT);
 
     return SUCCESS;
 }
@@ -477,9 +489,47 @@ ZEND_FUNCTION(fastcommon_is_private_ip)
     RETURN_BOOL(is_private_ip(ip));
 }
 
+static struct idg_context *get_idg_context(const char *filename,
+        const int machine_id, const int mid_bits, const int extra_bits,
+        const int sn_bits, const int mode)
+{
+    PHPIDGKeyInfo key_info;
+    struct idg_context *idg_context;
+
+    memset(&key_info, 0, sizeof(key_info));
+    snprintf(key_info.filename, sizeof(key_info.filename), "%s", filename);
+    key_info.machine_id = machine_id;
+    key_info.mid_bits = mid_bits;
+    key_info.extra_bits = extra_bits;
+    key_info.sn_bits = sn_bits;
+
+    idg_context = (struct idg_context *)hash_find(&idg_htable,
+            &key_info, sizeof(key_info));
+    if (idg_context == NULL) {
+        idg_context = (struct idg_context *)malloc(sizeof(struct idg_context));
+        if (idg_context == NULL) {
+            logError("file: "__FILE__", line: %d, "
+                    "malloc %d bytes fail!", __LINE__,
+                    (int)sizeof(struct idg_context));
+            return NULL;
+        }
+
+        if (id_generator_init_extra_ex(idg_context, filename,
+                    machine_id, mid_bits, extra_bits, sn_bits, mode) != 0)
+        {
+            return NULL;
+        }
+        hash_insert_ex(&idg_htable, &key_info, sizeof(key_info),
+                idg_context, 0, false);
+    }
+
+    return idg_context;
+}
+
 /*
 resource fastcommon_id_generator_init([string filename = "/tmp/fastcommon_id_generator.sn",
-	int machine_id = 0, int mid_bits = 16, int extra_bits = 0, int sn_bits = 16, int mode = 0644])
+	int machine_id = 0, int mid_bits = 16, int extra_bits = 0, int sn_bits = 16,
+    int mode = 0644, int flags = 0])
 return resource handle for success, false for fail
 */
 ZEND_FUNCTION(fastcommon_id_generator_init)
@@ -491,47 +541,50 @@ ZEND_FUNCTION(fastcommon_id_generator_init)
     long extra_bits;
     long sn_bits;
     long mode;
+    long flags;
     char *filename;
     PHPIDGContext *php_idg_context;
 
-	argc = ZEND_NUM_ARGS();
-	if (argc > 6) {
-		logError("file: "__FILE__", line: %d, "
-			"fastcommon_id_generator_init parameters count: %d is invalid",
-			__LINE__, argc);
-		RETURN_BOOL(false);
-	}
+    argc = ZEND_NUM_ARGS();
+    if (argc > 7) {
+        logError("file: "__FILE__", line: %d, "
+                "fastcommon_id_generator_init parameters count: %d is invalid",
+                __LINE__, argc);
+        RETURN_BOOL(false);
+    }
 
-	filename = DEFAULT_SN_FILENAME;
+    filename = DEFAULT_SN_FILENAME;
     filename_len = 0;
-	machine_id = 0;
-	mid_bits = 16;
+    machine_id = 0;
+    mid_bits = 16;
     extra_bits = 0;
     sn_bits = 16;
     mode = ID_GENERATOR_DEFAULT_FILE_MODE;
-	if (zend_parse_parameters(argc TSRMLS_CC, "|slllll", &filename,
+    flags = 0;
+    if (zend_parse_parameters(argc TSRMLS_CC, "|sllllll", &filename,
                 &filename_len, &machine_id, &mid_bits, &extra_bits,
-                &sn_bits, &mode) == FAILURE)
-	{
-		logError("file: "__FILE__", line: %d, "
-			"zend_parse_parameters fail!", __LINE__);
-		RETURN_BOOL(false);
-	}
-
-    php_idg_context = (PHPIDGContext *)emalloc(sizeof(PHPIDGContext));
-    if (php_idg_context == NULL)
+                &sn_bits, &mode, &flags) == FAILURE)
     {
-		logError("file: "__FILE__", line: %d, "
-			"emalloc %d bytes fail!", __LINE__, (int)sizeof(PHPIDGContext));
-		RETURN_BOOL(false);
+        logError("file: "__FILE__", line: %d, "
+                "zend_parse_parameters fail!", __LINE__);
+        RETURN_BOOL(false);
     }
 
-	if (id_generator_init_extra_ex(&php_idg_context->idg_context, filename,
-			machine_id, mid_bits, extra_bits, sn_bits, mode) != 0)
-	{
-		RETURN_BOOL(false);
-	}
+    php_idg_context = (PHPIDGContext *)emalloc(sizeof(PHPIDGContext));
+    if (php_idg_context == NULL) {
+        logError("file: "__FILE__", line: %d, "
+                "emalloc %d bytes fail!", __LINE__,
+                (int)sizeof(PHPIDGContext));
+        RETURN_BOOL(false);
+    }
 
+    if ((php_idg_context->idg_context=get_idg_context(filename, machine_id,
+                    mid_bits, extra_bits, sn_bits, mode)) == NULL)
+    {
+        RETURN_BOOL(false);
+    }
+
+    php_idg_context->flags = flags;
     last_idg_context = php_idg_context;
     ZEND_REGISTER_RESOURCE(return_value, php_idg_context, le_consumer);
 }
@@ -545,10 +598,11 @@ ZEND_FUNCTION(fastcommon_id_generator_next)
 {
     int argc;
     long extra;
+    int extra_val;
+    int *extra_ptr;
     int64_t id;
     zval *zhandle;
     PHPIDGContext *php_idg_context;
-    struct idg_context *context;
 
 	argc = ZEND_NUM_ARGS();
 	if (argc > 2) {
@@ -566,26 +620,31 @@ ZEND_FUNCTION(fastcommon_id_generator_next)
 		RETURN_BOOL(false);
 	}
 
-    if (zhandle != NULL && !ZVAL_IS_NULL(zhandle))
-    {
+    if (zhandle != NULL && !ZVAL_IS_NULL(zhandle)) {
         ZEND_FETCH_RESOURCE(php_idg_context, PHPIDGContext *, &zhandle, -1,
                 PHP_IDG_RESOURCE_NAME, le_consumer);
-        context = &php_idg_context->idg_context;
-    }
-    else
-    {
+    } else {
         if (last_idg_context == NULL) {
             logError("file: "__FILE__", line: %d, "
                     "must call fastcommon_id_generator_init first", __LINE__);
             RETURN_BOOL(false);
         }
 
-        context = &last_idg_context->idg_context;
+        php_idg_context = last_idg_context;
     }
 
-	if (id_generator_next_extra(context, extra, &id) != 0) {
-		RETURN_BOOL(false);
-	}
+    if ((php_idg_context->flags & IDG_FLAGS_EXTRA_DATA_BY_MOD)) {
+        extra_ptr = NULL;
+    } else {
+        extra_val = extra;
+        extra_ptr = &extra_val;
+    }
+
+    if (id_generator_next_extra_ptr(php_idg_context->idg_context,
+                extra_ptr, &id) != 0)
+    {
+            RETURN_BOOL(false);
+    }
 
 #if OS_BITS == 64
 	RETURN_LONG(id);
@@ -609,7 +668,6 @@ ZEND_FUNCTION(fastcommon_id_generator_get_extra)
     long id;
     zval *zhandle;
     PHPIDGContext *php_idg_context;
-    struct idg_context *context;
 
 	argc = ZEND_NUM_ARGS();
 	if (argc > 2) {
@@ -627,29 +685,25 @@ ZEND_FUNCTION(fastcommon_id_generator_get_extra)
 		RETURN_BOOL(false);
 	}
 
-    if (zhandle != NULL && !ZVAL_IS_NULL(zhandle))
-    {
+    if (zhandle != NULL && !ZVAL_IS_NULL(zhandle)) {
         ZEND_FETCH_RESOURCE(php_idg_context, PHPIDGContext *, &zhandle, -1,
                 PHP_IDG_RESOURCE_NAME, le_consumer);
-        context = &php_idg_context->idg_context;
-    }
-    else
-    {
+    } else {
         if (last_idg_context == NULL) {
             logError("file: "__FILE__", line: %d, "
                     "must call fastcommon_id_generator_init first", __LINE__);
             RETURN_BOOL(false);
         }
-        context = &last_idg_context->idg_context;
+        php_idg_context  = last_idg_context;
     }
 
-	if (context->fd < 0) {
+	if (php_idg_context->idg_context->fd < 0) {
 		logError("file: "__FILE__", line: %d, "
                 "must call fastcommon_id_generator_init first", __LINE__);
         RETURN_BOOL(false);
 	}
 
-	RETURN_LONG(id_generator_get_extra(context, id));
+	RETURN_LONG(id_generator_get_extra(php_idg_context->idg_context, id));
 }
 
 /*
@@ -660,8 +714,7 @@ ZEND_FUNCTION(fastcommon_id_generator_destroy)
 {
     int argc;
     zval *zhandle;
-    PHPIDGContext *php_idg_context;
-    struct idg_context *context;
+    //PHPIDGContext *php_idg_context;
 
 	argc = ZEND_NUM_ARGS();
 	if (argc > 1) {
@@ -679,24 +732,20 @@ ZEND_FUNCTION(fastcommon_id_generator_destroy)
 		RETURN_BOOL(false);
 	}
 
-    if (zhandle != NULL && !ZVAL_IS_NULL(zhandle))
-    {
+    if (zhandle != NULL && !ZVAL_IS_NULL(zhandle)) {
+        /*
         ZEND_FETCH_RESOURCE(php_idg_context, PHPIDGContext *, &zhandle, -1,
                 PHP_IDG_RESOURCE_NAME, le_consumer);
-        context = &php_idg_context->idg_context;
-    }
-    else
-    {
+                */
+    } else {
         if (last_idg_context == NULL) {
             logError("file: "__FILE__", line: %d, "
                     "must call fastcommon_id_generator_init first", __LINE__);
             RETURN_BOOL(false);
         }
-        context = &last_idg_context->idg_context;
         last_idg_context = NULL;
     }
 
-	id_generator_destroy(context);
 	RETURN_BOOL(true);
 }
 
@@ -710,7 +759,6 @@ ZEND_FUNCTION(fastcommon_id_generator_get_timestamp)
     long id;
     zval *zhandle;
     PHPIDGContext *php_idg_context;
-    struct idg_context *context;
 
 	argc = ZEND_NUM_ARGS();
 	if (argc > 2) {
@@ -728,29 +776,25 @@ ZEND_FUNCTION(fastcommon_id_generator_get_timestamp)
 		RETURN_BOOL(false);
 	}
 
-    if (zhandle != NULL && !ZVAL_IS_NULL(zhandle))
-    {
+    if (zhandle != NULL && !ZVAL_IS_NULL(zhandle)) {
         ZEND_FETCH_RESOURCE(php_idg_context, PHPIDGContext *, &zhandle, -1,
                 PHP_IDG_RESOURCE_NAME, le_consumer);
-        context = &php_idg_context->idg_context;
-    }
-    else
-    {
+    } else {
         if (last_idg_context == NULL) {
             logError("file: "__FILE__", line: %d, "
                     "must call fastcommon_id_generator_init first", __LINE__);
             RETURN_BOOL(false);
         }
-        context = &last_idg_context->idg_context;
+        php_idg_context = last_idg_context;
     }
 
-	if (context->fd < 0) {
+	if (php_idg_context->idg_context->fd < 0) {
 		logError("file: "__FILE__", line: %d, "
                 "must call fastcommon_id_generator_init first", __LINE__);
         RETURN_BOOL(false);
 	}
 
-	RETURN_LONG(id_generator_get_timestamp(context, id));
+	RETURN_LONG(id_generator_get_timestamp(php_idg_context->idg_context, id));
 }
 
 /*

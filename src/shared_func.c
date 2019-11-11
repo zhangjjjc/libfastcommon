@@ -616,6 +616,52 @@ char *trim(char *pStr)
 	return pStr;
 }
 
+void string_ltrim(string_t *s)
+{
+	char *p;
+	char *end;
+
+	end = s->str + s->len;
+	for (p=s->str; p<end; p++)
+	{
+		if (!(' ' == *p|| '\n' == *p || '\r' == *p || '\t' == *p))
+		{
+			break;
+		}
+	}
+
+	if (p != s->str)
+    {
+        s->str = p;
+        s->len = end - p;
+    }
+}
+
+void string_rtrim(string_t *s)
+{
+	char *p;
+	char *end;
+
+	if (s->len == 0)
+	{
+		return;
+	}
+
+	end = s->str + s->len - 1;
+	for (p = end; p >= s->str; p--)
+	{
+		if (!(' ' == *p || '\n' == *p || '\r' == *p || '\t' == *p))
+		{
+			break;
+		}
+	}
+
+	if (p != end)
+	{
+        s->len = (p + 1) - s->str;
+	}
+}
+
 char *formatDateYYYYMMDDHHMISS(const time_t t, char *szDateBuff, const int nSize)
 {
 	time_t timer = t;
@@ -745,6 +791,59 @@ int splitEx(char *src, const char seperator, char **pCols, const int nMaxCols)
 	}
 
 	return count;
+}
+
+bool fc_match_delim(const char *str, const char *delim)
+{
+    const char *sp;
+    const char *send;
+    const char *dp;
+    const char *dend;
+
+    send = str + strlen(str);
+    dend = delim + strlen(delim);
+    for (sp=str; sp<send; sp++)
+    {
+        for (dp=delim; dp<dend; dp++)
+        {
+            if (*sp == *dp)
+            {
+                break;
+            }
+        }
+
+        if (dp == dend)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+ 
+int fc_split_string(char *src, const char *delim, char **pCols, const int nMaxCols)
+{
+    char *token;
+    char *stringp;
+    int count = 0;
+
+    stringp = src;
+    while ((token=strsep(&stringp, delim)) != NULL)
+    {
+        if (count >= nMaxCols)
+        {
+            break;
+        }
+
+        if (fc_match_delim(token, delim))
+        {
+            continue;
+        }
+
+        pCols[count++] = token;
+    }
+
+    return count;
 }
 
 int my_strtok(char *src, const char *delim, char **pCols, const int nMaxCols)
@@ -1358,10 +1457,11 @@ int set_rlimit(int resource, const rlim_t value)
                 break;
         }
 
-		logError("file: "__FILE__", line: %d, " \
-			"call setrlimit fail, resource=%d (%s), value=%"PRId64", " \
-			"errno: %d, error info: %s", \
-			__LINE__, resource, label, (int64_t)value, \
+		logError("file: "__FILE__", line: %d, "
+			"call setrlimit fail, resource=%d (%s), "
+            "old value=%"PRId64", new value=%"PRId64", "
+			"errno: %d, error info: %s", __LINE__, resource, label,
+            (int64_t)limit.rlim_cur, (int64_t)value,
 			errno, STRERROR(errno));
 		return errno != 0 ? errno : EPERM;
 	}
@@ -1612,11 +1712,11 @@ static int parse_cidr_ips(const char *ip_addr, in_addr_t **allow_ip_addrs,
 		return EINVAL;
 	}
 
-	if (network_bits < 16 || network_bits >= 32)
+	if (network_bits < 10 || network_bits >= 32)
 	{
 		logError("file: "__FILE__", line: %d, " \
 			"ip address: %s, invalid network bits: %d, " \
-			"it should >= 16 and < 32", \
+			"it should >= 10 and < 32", \
 			__LINE__, ip_addr, network_bits);
 		return EINVAL;
 	}
@@ -2113,11 +2213,6 @@ char *urldecode(const char *src, const int src_len, char *dest, int *dest_len)
 
 char *urldecode_ex(const char *src, const int src_len, char *dest, int *dest_len)
 {
-#define IS_HEX_CHAR(ch) \
-	((ch >= '0' && ch <= '9') || \
-	 (ch >= 'a' && ch <= 'f') || \
-	 (ch >= 'A' && ch <= 'F'))
-
 #define HEX_VALUE(ch, value) \
 	if (ch >= '0' && ch <= '9') \
 	{ \
@@ -2564,4 +2659,190 @@ key_t fc_ftok(const char *path, const int proj_id)
     int hash_code;
     hash_code = simple_hash(path, strlen(path));
     return (((proj_id & 0xFF) << 24) | (hash_code & 0xFFFFFF));
+}
+
+static void add_thousands_separator(char *str, const int len)
+{
+    int new_len;
+    int addings;
+    int sub;
+    int chars;
+    int add_count;
+    char *src;
+    char *dest;
+    char *first;
+
+    if (len <= 3)
+    {
+        return;
+    }
+
+    if (*str == '-')
+    {
+        first = str + 1;
+        sub = 2;
+    }
+    else
+    {
+        first = str;
+        sub = 1;
+    }
+
+    addings = (len - sub) / 3;
+    new_len = len + addings;
+
+    src = str + (len - 1);
+    dest = str + new_len;
+    *dest-- = '\0';
+    chars = 0;
+    add_count = 0;
+    while (src >= first)
+    {
+        *dest-- = *src--;
+        if (++chars % 3 == 0)
+        {
+            if (add_count == addings)
+            {
+                break;
+            }
+
+            *dest-- = ',';
+            add_count++;
+        }
+    }
+}
+
+const char *int2str(const int n, char *buff, const bool thousands_separator)
+{
+    int len;
+    len = sprintf(buff, "%d", n);
+    if (thousands_separator)
+    {
+        add_thousands_separator(buff, len);
+    }
+    return buff;
+}
+
+const char *long2str(const int64_t n, char *buff, const bool thousands_separator)
+{
+    int len;
+    len = sprintf(buff, "%"PRId64, n);
+    if (thousands_separator)
+    {
+        add_thousands_separator(buff, len);
+    }
+    return buff;
+}
+
+bool starts_with(const char *str, const char *needle)
+{
+    int str_len;
+    int needle_len;
+
+    str_len = strlen(str);
+    needle_len = strlen(needle);
+    if (needle_len > str_len) {
+        return false;
+    }
+
+    return memcmp(str, needle, needle_len) == 0;
+}
+
+bool ends_with(const char *str, const char *needle)
+{
+    int str_len;
+    int needle_len;
+    int start_offset;
+
+    str_len = strlen(str);
+    needle_len = strlen(needle);
+    start_offset = str_len - needle_len;
+    if (start_offset < 0) {
+        return false;
+    }
+
+    return memcmp(str + start_offset, needle, needle_len) == 0;
+}
+
+char *fc_strdup(const char *str, const int len)
+{
+    char *output;
+
+    output = (char *)malloc(len + 1);
+    if (output == NULL) {
+        logError("file: "__FILE__", line: %d, "
+                "malloc %d bytes fail",
+                __LINE__, len + 1);
+        return NULL;
+    }
+
+    if (len > 0) {
+        memcpy(output, str, len);
+    }
+    *(output + len) = '\0';
+    return output;
+}
+
+const char *fc_memmem(const string_t *str, const string_t *needle)
+{
+    const char *ps;
+    const char *last;
+    const char *pn;
+    const char *nend;
+    int loop;
+    int i;
+
+    loop = str->len - needle->len;
+    if (loop < 0) {
+        return NULL;
+    }
+
+    last = str->str + loop;
+    nend = needle->str + needle->len;
+    for (ps=str->str; ps<=last; ps++) {
+        for (pn=needle->str,i=0; pn<nend; pn++,i++) {
+            if (*pn != *(ps + i)) {
+                break;
+            }
+        }
+        if (pn == nend) {
+            return ps;
+        }
+    }
+
+    return NULL;
+}
+
+char *format_http_date(time_t t, BufferInfo *buffer)
+{
+    struct tm tm_info;
+
+    gmtime_r(&t, &tm_info);
+    buffer->length = strftime(buffer->buff, buffer->alloc_size,
+            "%a, %d %b %Y %H:%M:%S GMT", &tm_info);
+    return buffer->buff;
+}
+
+char *resolve_path(const char *from, const char *filename,
+        char *full_filename, const int size)
+{
+    const char *last;
+    int len;
+
+    if (*filename == '/') {
+        snprintf(full_filename, size, "%s", filename);
+        return full_filename;
+    }
+
+    last = strrchr(from, '/');
+    if (last != NULL) {
+        len = last - from;
+        snprintf(full_filename, size, "%.*s/%s", len, from, filename);
+    } else {
+		logWarning("file: "__FILE__", line: %d, "
+                "no \"/\" in the from filename: %s",
+                __LINE__, from);
+        snprintf(full_filename, size, "%s", filename);
+    }
+    return full_filename;
 }

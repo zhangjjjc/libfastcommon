@@ -6,7 +6,9 @@
 * Please visit the FastDFS Home Page http://www.csource.org/ for more detail.
 **/
 
-//flat_skiplist.h, support stable sort  :)
+//flat_skiplist.h, support duplicated entries, and support stable sort  :)
+//you should use multi_skiplist with too many duplicated entries
+
 #ifndef _FLAT_SKIPLIST_H
 #define _FLAT_SKIPLIST_H
 
@@ -33,6 +35,7 @@ typedef struct flat_skiplist
     struct fast_mblock_man *mblocks;  //node allocators
     FlatSkiplistNode *top;   //the top node
     FlatSkiplistNode *tail;  //the tail node for interator
+    FlatSkiplistNode **tmp_previous;  //thread safe for insert
 } FlatSkiplist;
 
 typedef struct flat_skiplist_iterator {
@@ -59,6 +62,8 @@ int flat_skiplist_delete(FlatSkiplist *sl, void *data);
 int flat_skiplist_delete_all(FlatSkiplist *sl, void *data, int *delete_count);
 void *flat_skiplist_find(FlatSkiplist *sl, void *data);
 int flat_skiplist_find_all(FlatSkiplist *sl, void *data, FlatSkiplistIterator *iterator);
+int flat_skiplist_find_range(FlatSkiplist *sl, void *start_data, void *end_data,
+        FlatSkiplistIterator *iterator);
 
 static inline void flat_skiplist_iterator(FlatSkiplist *sl, FlatSkiplistIterator *iterator)
 {
@@ -77,6 +82,33 @@ static inline void *flat_skiplist_next(FlatSkiplistIterator *iterator)
     data = iterator->current->data;
     iterator->current = iterator->current->prev;
     return data;
+}
+
+static inline bool flat_skiplist_empty(FlatSkiplist *sl)
+{
+    return sl->top->links[0] == sl->tail;
+}
+
+typedef const char * (*flat_skiplist_tostring_func)(void *data, char *buff, const int size);
+
+static inline void flat_skiplist_print(FlatSkiplist *sl, flat_skiplist_tostring_func tostring_func)
+{
+    int i;
+    FlatSkiplistNode *current;
+    char buff[1024];
+
+    printf("###################\n");
+    for (i=sl->top_level_index; i>=0; i--) {
+        printf("level %d: ", i);
+        current = sl->top->links[i];
+        while (current != sl->tail) {
+            printf("%s ", tostring_func(current->data, buff, sizeof(buff)));
+            current = current->links[i];
+        }
+        printf("\n");
+    }
+    printf("###################\n");
+    printf("\n");
 }
 
 #ifdef __cplusplus

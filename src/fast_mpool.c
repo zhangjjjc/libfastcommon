@@ -165,6 +165,24 @@ void *fast_mpool_alloc(struct fast_mpool_man *mpool, const int size)
 	return NULL;
 }
 
+int fast_mpool_strdup_ex(struct fast_mpool_man *mpool, string_t *dest,
+        const char *src, const int len)
+{
+    dest->str = (char *)fast_mpool_alloc(mpool, len);
+    if (dest->str == NULL)
+    {
+        logError("file: "__FILE__", line: %d, "
+                "alloc %d bytes from mpool fail", __LINE__, len);
+        return ENOMEM;
+    }
+
+    if (len > 0) {
+        memcpy(dest->str, src, len);
+    }
+    dest->len = len;
+    return 0;
+}
+
 void fast_mpool_reset(struct fast_mpool_man *mpool)
 {
 	struct fast_mpool_malloc *pMallocNode;

@@ -24,8 +24,6 @@ struct mpool_chain {
 
 static struct mpool_chain g_mpool = {NULL, NULL};
 
-#define ALIGNED_TASK_INFO_SIZE  MEM_ALIGN(sizeof(struct fast_task_info))
-
 int task_queue_init(struct fast_task_queue *pQueue)
 {
 	int result;
@@ -209,7 +207,7 @@ int free_queue_init_ex(const int max_connections, const int init_connections,
 		alloc_once = MAX_DATA_SIZE / g_free_queue.block_size;
         if (g_free_queue.alloc_task_once > alloc_once)
         {
-            g_free_queue.alloc_task_once = alloc_once;
+            g_free_queue.alloc_task_once = alloc_once > 0 ? alloc_once : 1;
         }
     }
     else

@@ -85,8 +85,9 @@ void conn_pool_disconnect_server(ConnectionInfo *pConnection)
 	}
 }
 
-int conn_pool_connect_server(ConnectionInfo *pConnection, \
-		const int connect_timeout)
+int conn_pool_connect_server_ex(ConnectionInfo *pConnection,
+		const int connect_timeout, const char *bind_ipaddr,
+        const bool log_connect_error)
 {
 	int result;
     int domain;
@@ -108,12 +109,21 @@ int conn_pool_connect_server(ConnectionInfo *pConnection, \
 	pConnection->sock = socket(domain, SOCK_STREAM, 0);
 	if(pConnection->sock < 0)
 	{
-		logError("file: "__FILE__", line: %d, " \
-			"socket create failed, errno: %d, " \
+		logError("file: "__FILE__", line: %d, "
+			"socket create fail, errno: %d, "
 			"error info: %s", __LINE__, errno, STRERROR(errno));
 		return errno != 0 ? errno : EPERM;
 	}
 
+    if (bind_ipaddr != NULL && *bind_ipaddr != '\0')
+    {
+        if ((result=socketBind2(domain, pConnection->sock, bind_ipaddr, 0)) != 0)
+        {
+            return result;
+        }
+    }
+
+    SET_SOCKOPT_NOSIGPIPE(pConnection->sock);
 	if ((result=tcpsetnonblockopt(pConnection->sock)) != 0)
 	{
 		close(pConnection->sock);
@@ -121,14 +131,17 @@ int conn_pool_connect_server(ConnectionInfo *pConnection, \
 		return result;
 	}
 
-	if ((result=connectserverbyip_nb(pConnection->sock, \
-		pConnection->ip_addr, pConnection->port, \
+	if ((result=connectserverbyip_nb(pConnection->sock,
+		pConnection->ip_addr, pConnection->port,
 		connect_timeout)) != 0)
 	{
-		logError("file: "__FILE__", line: %d, " \
-			"connect to %s:%d fail, errno: %d, " \
-			"error info: %s", __LINE__, pConnection->ip_addr, \
-			pConnection->port, result, STRERROR(result));
+        if (log_connect_error)
+        {
+            logError("file: "__FILE__", line: %d, "
+                    "connect to server %s:%d fail, errno: %d, "
+                    "error info: %s", __LINE__, pConnection->ip_addr,
+                    pConnection->port, result, STRERROR(result));
+        }
 
 		close(pConnection->sock);
 		pConnection->sock = -1;
@@ -282,6 +295,7 @@ ConnectionInfo *conn_pool_get_connection(ConnectionPool *cp,
 				"total_count: %d, free_count: %d", 
 				__LINE__, conn->ip_addr, conn->port, 
 				ci->sock, cm->total_count, cm->free_count);
+            *err_no = 0;
 			return ci;
 		}
 	}
@@ -375,3 +389,73 @@ int conn_pool_get_connection_count(ConnectionPool *cp)
 	return count;
 }
 
+int conn_pool_parse_server_info(const char *pServerStr,
+        ConnectionInfo *pServerInfo, const int default_port)
+{
+    char *parts[2];
+    char server_info[256];
+    int len;
+    int count;
+
+    len = strlen(pServerStr);
+    if (len == 0) {
+        logError("file: "__FILE__", line: %d, "
+            "pServerStr \"%s\" is empty!",
+            __LINE__, pServerStr);
+        return EINVAL;
+    }
+    if (len >= sizeof(server_info)) {
+        logError("file: "__FILE__", line: %d, "
+            "pServerStr \"%s\" is too long!",
+            __LINE__, pServerStr);
+        return ENAMETOOLONG;
+    }
+
+    memcpy(server_info, pServerStr, len);
+    *(server_info + len) = '\0';
+
+    count = splitEx(server_info, ':', parts, 2);
+    if (count == 1) {
+        pServerInfo->port = default_port;
+    }
+    else {
+        char *endptr = NULL;
+        pServerInfo->port = (int)strtol(parts[1], &endptr, 10);
+        if ((endptr != NULL && *endptr != '\0') || pServerInfo->port <= 0) {
+            logError("file: "__FILE__", line: %d, "
+                "pServerStr: %s, invalid port: %s!",
+                __LINE__, pServerStr, parts[1]);
+            return EINVAL;
+        }
+    }
+
+    if (getIpaddrByName(parts[0], pServerInfo->ip_addr,
+        sizeof(pServerInfo->ip_addr)) == INADDR_NONE)
+    {
+        logError("file: "__FILE__", line: %d, "
+            "pServerStr: %s, invalid hostname: %s!",
+            __LINE__, pServerStr, parts[0]);
+        return EINVAL;
+    }
+
+    pServerInfo->socket_domain = AF_INET;
+    pServerInfo->sock = -1;
+    return 0;
+}
+
+int conn_pool_load_server_info(IniContext *pIniContext, const char *filename,
+        const char *item_name, ConnectionInfo *pServerInfo,
+        const int default_port)
+{
+    char *pServerStr;
+
+	pServerStr = iniGetStrValue(NULL, item_name, pIniContext);
+    if (pServerStr == NULL) {
+        logError("file: "__FILE__", line: %d, "
+                "config file: %s, item \"%s\" not exist!",
+                __LINE__, filename, item_name);
+        return ENOENT;
+    }
+
+    return conn_pool_parse_server_info(pServerStr, pServerInfo, default_port);
+}

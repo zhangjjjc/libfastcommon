@@ -192,6 +192,63 @@ void long2buff(int64_t n, char *buff);
 */
 int64_t buff2long(const char *buff);
 
+
+/** 32 bits float convert to buffer (big-endian)
+ *  parameters:
+ *  	n: 32 bits float value
+ *  	buff: the buffer, at least 4 bytes space, no tail \0
+ *  return: none
+*/
+static inline void float2buff(float f, char *buff)
+{
+    int *p;
+    p = (int *)&f;
+    int2buff(*p, buff);
+}
+
+/** buffer convert to 32 bits float
+ *  parameters:
+ *  	buff: big-endian 8 bytes buffer
+ *  return: 32 bits float value
+*/
+static inline float buff2float(const char *buff)
+{
+    int n;
+    float *p;
+
+    n = buff2int(buff);
+    p = (float *)&n;
+    return *p;
+}
+
+/** double (64 bits) convert to buffer (big-endian)
+ *  parameters:
+ *  	n: 64 bits double value
+ *  	buff: the buffer, at least 8 bytes space, no tail \0
+ *  return: none
+*/
+static inline void double2buff(double d, char *buff)
+{
+    int64_t *p;
+    p = (int64_t *)&d;
+    long2buff(*p, buff);
+}
+
+/** buffer convert to 64 bits double
+ *  parameters:
+ *  	buff: big-endian 8 bytes buffer
+ *  return: 64 bits double value
+*/
+static inline double buff2double(const char *buff)
+{
+    int64_t n;
+    double *p;
+
+    n = buff2long(buff);
+    p = (double *)&n;
+    return *p;
+}
+
 /** trim leading spaces ( \t\r\n)
  *  parameters:
  *  	pStr: the string to trim
@@ -223,6 +280,31 @@ static inline char *fc_trim(char *pStr)
 	trim_right(pStr);
 	trim_left(pStr);
 	return pStr;
+}
+
+/** trim leading spaces ( \t\r\n)
+ *  parameters:
+ *  	s: the string to trim
+ *  return: none
+*/
+void string_ltrim(string_t *s);
+
+/** trim tail spaces ( \t\r\n)
+ *  parameters:
+ *  	s: the string to trim
+ *  return: none
+*/
+void string_rtrim(string_t *s);
+
+#define FC_STRING_TRIM(s)  \
+    do {  \
+        string_ltrim(s);  \
+        string_rtrim(s);  \
+    } while (0)
+
+static inline void string_trim(string_t *s)
+{
+    FC_STRING_TRIM(s);
 }
 
 /** copy string to BufferInfo
@@ -308,6 +390,25 @@ void freeSplit(char **p);
  *  return: string array / column count
 */
 int splitEx(char *src, const char seperator, char **pCols, const int nMaxCols);
+
+
+/** split string by delimiter characters
+ *  parameters:
+ *  	src: the source string, will be modified by this function
+ *  	delim: the delimiter characters
+ *  	pCols: store split strings
+ *  	nMaxCols: max columns (max split count)
+ *  return: string array / column count
+*/
+int fc_split_string(char *src, const char *delim, char **pCols, const int nMaxCols);
+
+/** if the input string contains all delimiter characters
+ *  parameters:
+ *  	str: the input string
+ *  	delim: the delimiter characters
+ *  return: true for contains all delimiter characters, otherwise false
+*/
+bool fc_match_delim(const char *str, const char *delim);
 
 /** split string
  *  parameters:
@@ -670,6 +771,85 @@ ssize_t fc_safe_read(int fd, char *buf, const size_t count);
  *  return: read bytes for success, -1 when fail
 */
 key_t fc_ftok(const char *path, const int proj_id);
+
+/** convert int to string
+ *  parameters:
+ *  	n: the 32 bits integer
+ *      buff: output buffer
+ *      thousands_separator: if add thousands separator
+ *  return: string buffer
+*/
+const char *int2str(const int n, char *buff, const bool thousands_separator);
+
+static inline const char *int_to_comma_str(const int n, char *buff)
+{
+    return int2str(n, buff, true);
+}
+
+/** convert long to string
+ *  parameters:
+ *  	n: the 64 bits integer
+ *      buff: output buffer
+ *      thousands_separator: if add thousands separator
+ *  return: string buffer
+*/
+const char *long2str(const int64_t n, char *buff, const bool thousands_separator);
+
+static inline const char *long_to_comma_str(const int64_t n, char *buff)
+{
+    return long2str(n, buff, true);
+}
+
+/** if the string starts with the needle string
+ *  parameters:
+ *  	str: the string to detect
+ *      needle: the needle string
+ *  return: true for starts with the needle string, otherwise false
+*/
+bool starts_with(const char *str, const char *needle);
+
+/** if the string ends with the needle string
+ *  parameters:
+ *  	str: the string to detect
+ *      needle: the needle string
+ *  return: true for ends with the needle string, otherwise false
+*/
+bool ends_with(const char *str, const char *needle);
+
+/** strdup
+ *  parameters:
+ *  	str: the string to duplicate
+ *      len: the length of string
+ *  return: the duplicated string, NULL for fail
+*/
+char *fc_strdup(const char *str, const int len);
+
+/** memmem
+ *  parameters:
+ *  	str: the string to match
+ *      needle: the needle string
+ *  return: the matched string, NULL for fail
+*/
+const char *fc_memmem(const string_t *str, const string_t *needle);
+
+/** format HTTP Date as: Sat, 11 Mar 2017 21:49:51 GMT
+ *  parameters:
+ *  	t: the time to format
+ *      buffer: the buffer
+ *  return: formatted GMT date string
+*/
+char *format_http_date(time_t t, BufferInfo *buffer);
+
+/** return full path for the filename (the second parameter)
+ *  parameters:
+ *  	from: the input full path filename to get base path
+ *      filename: the filename to resolve path
+ *      full_filename: store the resolved full path filename
+ *      size: the max size of full_filename
+ *  return: the resolved full path filename
+*/
+char *resolve_path(const char *from, const char *filename,
+        char *full_filename, const int size);
 
 #ifdef __cplusplus
 }

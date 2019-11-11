@@ -6,7 +6,8 @@
 * Please visit the FastDFS Home Page http://www.csource.org/ for more detail.
 **/
 
-//multi_skiplist.h, support stable sort  :)
+//multi_skiplist.h, support duplicated entries, and support stable sort  :)
+
 #ifndef _MULTI_SKIPLIST_H
 #define _MULTI_SKIPLIST_H
 
@@ -40,6 +41,7 @@ typedef struct multi_skiplist
     struct fast_mblock_man *mblocks;  //node allocators
     MultiSkiplistNode *top;   //the top node
     MultiSkiplistNode *tail;  //the tail node for terminate
+    MultiSkiplistNode **tmp_previous;  //thread safe for insert
 } MultiSkiplist;
 
 typedef struct multi_skiplist_iterator {
@@ -71,13 +73,20 @@ int multi_skiplist_delete_all(MultiSkiplist *sl, void *data, int *delete_count);
 void *multi_skiplist_find(MultiSkiplist *sl, void *data);
 int multi_skiplist_find_all(MultiSkiplist *sl, void *data,
         MultiSkiplistIterator *iterator);
+int multi_skiplist_find_range(MultiSkiplist *sl, void *start_data, void *end_data,
+        MultiSkiplistIterator *iterator);
 
 static inline void multi_skiplist_iterator(MultiSkiplist *sl,
         MultiSkiplistIterator *iterator)
 {
     iterator->tail = sl->tail;
-    iterator->current.node = sl->top;
-    iterator->current.data = NULL;
+    iterator->current.node = sl->top->links[0];
+    if (iterator->current.node != sl->tail) {
+        iterator->current.data = iterator->current.node->head;
+    }
+    else {
+        iterator->current.data = NULL;
+    }
 }
 
 static inline void *multi_skiplist_next(MultiSkiplistIterator *iterator)
@@ -100,9 +109,35 @@ static inline void *multi_skiplist_next(MultiSkiplistIterator *iterator)
     return data;
 }
 
+static inline bool multi_skiplist_empty(MultiSkiplist *sl)
+{
+    return sl->top->links[0] == sl->tail;
+}
+
+typedef const char * (*multi_skiplist_tostring_func)(void *data, char *buff, const int size);
+
+static inline void multi_skiplist_print(MultiSkiplist *sl, multi_skiplist_tostring_func tostring_func)
+{
+    int i;
+    MultiSkiplistNode *current;
+    char buff[1024];
+
+    printf("###################\n");
+    for (i=sl->top_level_index; i>=0; i--) {
+        printf("level %d: ", i);
+        current = sl->top->links[i];
+        while (current != sl->tail) {
+            printf("%s ", tostring_func(current->head->data, buff, sizeof(buff)));
+            current = current->links[i];
+        }
+        printf("\n");
+    }
+    printf("###################\n");
+    printf("\n");
+}
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif
-

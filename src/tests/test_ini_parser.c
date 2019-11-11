@@ -7,11 +7,13 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/stat.h>
-#include "logger.h"
-#include "shared_func.h"
-#include "ini_file_reader.h"
+#include "fastcommon/logger.h"
+#include "fastcommon/shared_func.h"
+#include "fastcommon/ini_file_reader.h"
 
-static int iniAnnotationFuncExpressCalc(char *param, char **pOutValue, int max_values)
+static int iniAnnotationFuncExpressCalc(IniContext *context,
+        struct ini_annotation_entry *annotation, const IniItem *item,
+        char **pOutValue, int max_values)
 {
     int count;
     int result;
@@ -19,7 +21,7 @@ static int iniAnnotationFuncExpressCalc(char *param, char **pOutValue, int max_v
     static char output[256];
 
     count = 0;
-    sprintf(cmd, "echo \'%s\' | bc -l", param);
+    sprintf(cmd, "echo \'%s\' | bc -l", item->value);
     if ((result=getExecResult(cmd, output, sizeof(output))) != 0)
     {
         logWarning("file: "__FILE__", line: %d, "
@@ -30,7 +32,7 @@ static int iniAnnotationFuncExpressCalc(char *param, char **pOutValue, int max_v
     if (*output == '\0')
     {
         logWarning("file: "__FILE__", line: %d, "
-                "empty reply when exec: %s", __LINE__, param);
+                "empty reply when exec: %s", __LINE__, item->value);
     }
     pOutValue[count++] = fc_trim(output);
     return count;
@@ -41,7 +43,7 @@ int main(int argc, char *argv[])
 	int result;
     IniContext context;
     const char *szFilename = "test.ini";
-    AnnotationMap annotations[1];
+    AnnotationEntry annotations[1];
 
     if (argc > 1) {
         szFilename = argv[1];
@@ -49,9 +51,8 @@ int main(int argc, char *argv[])
 	
 	log_init();
 
+    memset(annotations, 0, sizeof(annotations));
     annotations[0].func_name = "EXPRESS_CALC";
-    annotations[0].func_init = NULL;
-    annotations[0].func_destroy = NULL;
     annotations[0].func_get = iniAnnotationFuncExpressCalc;
 
     //printf("sizeof(IniContext): %d\n", (int)sizeof(IniContext));
@@ -64,7 +65,7 @@ int main(int argc, char *argv[])
     }
 
     iniPrintItems(&context);
-
+    iniDestroyAnnotationCallBack();
     iniFreeContext(&context);
 	return 0;
 }

@@ -137,6 +137,7 @@ int hash_set_locks(HashArray *pHash, const int lock_count)
 		return EINVAL;
 	}
 
+    //do NOT support rehash
 	if (pHash->load_factor >= 0.10)
 	{
 		return EINVAL;
@@ -565,6 +566,24 @@ void *hash_find(HashArray *pHash, const void *key, const int key_len)
 	{
 		return NULL;
 	}
+}
+
+int hash_find2(HashArray *pHash, const string_t *key, string_t *value)
+{
+    HashData *hdata;
+    if ((hdata=hash_find1_ex(pHash, key)) == NULL)
+    {
+        return ENOENT;
+    }
+
+    value->str = hdata->value;
+    value->len = hdata->value_len;
+    return 0;
+}
+
+HashData *hash_find1_ex(HashArray *pHash, const string_t *key)
+{
+    return hash_find_ex(pHash, key->str, key->len);
 }
 
 int hash_get(HashArray *pHash, const void *key, const int key_len,
@@ -1369,7 +1388,7 @@ static unsigned int crc_table[256] = {
 #define CRC32_BODY(init_value) \
 	unsigned char *pKey; \
 	unsigned char *pEnd; \
-	int crc; \
+	int64_t crc; \
  \
 	crc = init_value; \
 	pEnd = (unsigned char *)key + key_len; \
@@ -1378,18 +1397,17 @@ static unsigned int crc_table[256] = {
 		crc = crc_table[(crc ^ *pKey) & 0xFF] ^ (crc >> 8); \
 	} \
 
-int CRC32(void *key, const int key_len)
+int CRC32(const void *key, const int key_len)
 {
 	CRC32_BODY(CRC32_XINIT)
 
-	return crc ^ CRC32_XOROT;
+	return (int)(crc ^ CRC32_XOROT);
 }
 
-int CRC32_ex(void *key, const int key_len, \
-	const int init_value)
+int64_t CRC32_ex(const void *key, const int key_len, \
+	const int64_t init_value)
 {
 	CRC32_BODY(init_value)
 
 	return crc;
 }
-

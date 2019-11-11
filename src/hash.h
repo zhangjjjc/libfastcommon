@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define CRC32_XINIT 0xFFFFFFFF		/* initial value */
+#define CRC32_XINIT 0xFFFFFFFF      /* initial value */
 #define CRC32_XOROT 0xFFFFFFFF		/* final xor value */
 
 typedef int (*HashFunc) (const void *key, const int key_len);
@@ -103,7 +103,7 @@ typedef int (*HashWalkFunc)(const int index, const HashData *data, void *args);
  *         pHash: the hash table
  *         hash_func: hash function
  *         capacity: init capacity
- *         load_factor: hash load factor, such as 0.75
+ *         load_factor: hash load factor (or watermark), >= 0.10 for auto rehash. eg. 0.75
  *         max_bytes:  max memory can be used (bytes)
  *         bMallocValue: if need malloc value buffer
  * return 0 for success, != 0 for error
@@ -198,6 +198,36 @@ void *hash_find(HashArray *pHash, const void *key, const int key_len);
 */
 HashData *hash_find_ex(HashArray *pHash, const void *key, const int key_len);
 
+/**
+ * hash find key
+ * parameters:
+ *         pHash: the hash table
+ *         key: the key to find
+ * return user data, return NULL when the key not exist
+*/
+static inline void *hash_find1(HashArray *pHash, const string_t *key)
+{
+    return hash_find(pHash, key->str, key->len);
+}
+
+/**
+ * hash get the value of the key
+ * parameters:
+ *         pHash: the hash table
+ *         key: the key to find
+ *         value: store the value
+ * return 0 for success, != 0 fail (errno)
+*/
+int hash_find2(HashArray *pHash, const string_t *key, string_t *value);
+
+/**
+ * hash find key
+ * parameters:
+ *         pHash: the hash table
+ *         key: the key to find
+ * return hash data, return NULL when the key not exist
+*/
+HashData *hash_find1_ex(HashArray *pHash, const string_t *key);
 
 /**
  * hash get the value of the key
@@ -350,9 +380,9 @@ int simple_hash(const void* key, const int key_len);
 int simple_hash_ex(const void* key, const int key_len, \
 	const int init_value);
 
-int CRC32(void *key, const int key_len);
-int CRC32_ex(void *key, const int key_len, \
-	const int init_value);
+int CRC32(const void *key, const int key_len);
+int64_t CRC32_ex(const void *key, const int key_len, \
+	const int64_t init_value);
 
 #define CRC32_FINAL(crc)  (crc ^ CRC32_XOROT)
 

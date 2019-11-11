@@ -51,7 +51,7 @@ static int check_and_mk_log_dir(const char *base_path)
 		if (mkdir(data_path, 0755) != 0)
 		{
 			fprintf(stderr, "mkdir \"%s\" fail, " \
-				"errno: %d, error info: %s", \
+				"errno: %d, error info: %s\n", \
 				data_path, errno, STRERROR(errno));
 			return errno != 0 ? errno : EPERM;
 		}
@@ -64,6 +64,8 @@ int log_init()
 {
 	if (g_log_context.log_buff != NULL)
 	{
+        fprintf(stderr, "file: "__FILE__", line: %d, "
+                "g_log_context already inited\n", __LINE__);
 		return 0;
 	}
 
@@ -96,7 +98,7 @@ int log_init_ex(LogContext *pContext)
 	if (pContext->log_buff == NULL)
 	{
 		fprintf(stderr, "malloc %d bytes fail, " \
-			"errno: %d, error info: %s", \
+			"errno: %d, error info: %s\n", \
 			LOG_BUFF_SIZE, errno, STRERROR(errno));
 		return errno != 0 ? errno : ENOMEM;
 	}
@@ -761,7 +763,7 @@ static void log_gzip(LogContext *pContext)
         {
             fprintf(stderr, "file: "__FILE__", line: %d, " \
                     "create thread failed, " \
-                    "errno: %d, error info: %s", \
+                    "errno: %d, error info: %s\n", \
                     __LINE__, result, STRERROR(result));
         }
         pthread_attr_destroy(&thread_attr);
@@ -888,7 +890,7 @@ static int log_fsync(LogContext *pContext, const bool bNeedLock)
 	{
 		fprintf(stderr, "file: "__FILE__", line: %d, " \
 			"call pthread_mutex_lock fail, " \
-			"errno: %d, error info: %s", \
+			"errno: %d, error info: %s\n", \
 			__LINE__, lock_res, STRERROR(lock_res));
 	}
 
@@ -924,7 +926,7 @@ static int log_fsync(LogContext *pContext, const bool bNeedLock)
 	{
 		fprintf(stderr, "file: "__FILE__", line: %d, " \
 			"call pthread_mutex_unlock fail, " \
-			"errno: %d, error info: %s", \
+			"errno: %d, error info: %s\n", \
 			__LINE__, lock_res, STRERROR(lock_res));
 	}
 
@@ -961,14 +963,14 @@ static void doLogEx(LogContext *pContext, struct timeval *tv, \
 	{
 		fprintf(stderr, "file: "__FILE__", line: %d, " \
 			"call pthread_mutex_lock fail, " \
-			"errno: %d, error info: %s", \
+			"errno: %d, error info: %s\n", \
 			__LINE__, result, STRERROR(result));
 	}
 
 	if (text_len + 64 > LOG_BUFF_SIZE)
 	{
 		fprintf(stderr, "file: "__FILE__", line: %d, " \
-			"log buff size: %d < log text length: %d ", \
+			"log buff size: %d < log text length: %d\n", \
 			__LINE__, LOG_BUFF_SIZE, text_len + 64);
         if (bNeedLock)
         {
@@ -1021,7 +1023,7 @@ static void doLogEx(LogContext *pContext, struct timeval *tv, \
 	{
 		fprintf(stderr, "file: "__FILE__", line: %d, " \
 			"call pthread_mutex_unlock fail, " \
-			"errno: %d, error info: %s", \
+			"errno: %d, error info: %s\n", \
 			__LINE__, result, STRERROR(result));
 	}
 }
@@ -1242,6 +1244,44 @@ void logAccess(LogContext *pContext, struct timeval *tvStart, \
         len = sizeof(text) - 1;
     }
 	doLogEx(pContext, tvStart, NULL, text, len, false, true);
+}
+
+const char *log_get_level_caption_ex(LogContext *pContext)
+{
+	const char *caption;
+
+	switch (pContext->log_level)
+	{
+		case LOG_DEBUG:
+			caption = "DEBUG";
+			break;
+		case LOG_INFO:
+			caption = "INFO";
+			break;
+		case LOG_NOTICE:
+			caption = "NOTICE";
+			break;
+		case LOG_WARNING:
+			caption = "WARNING";
+			break;
+		case LOG_ERR:
+			caption = "ERROR";
+			break;
+		case LOG_CRIT:
+			caption = "CRIT";
+			break;
+		case LOG_ALERT:
+			caption = "ALERT";
+			break;
+		case LOG_EMERG:
+			caption = "EMERG";
+			break;
+		default:
+			caption = "UNKOWN";
+			break;
+	}
+
+    return caption;
 }
 
 #ifndef LOG_FORMAT_CHECK
